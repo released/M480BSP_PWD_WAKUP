@@ -377,7 +377,7 @@
               <MiscControls></MiscControls>
               <Define></Define>
               <Undefine></Undefine>
-              <IncludePath>..\..\..\Library\CMSIS\Include;..\..\..\Library\Device\Nuvoton\M480\Include;..\..\..\Library\StdDriver\inc</IncludePath>
+              <IncludePath>..\..\..\Library\CMSIS\Include;..\..\..\Library\Device\Nuvoton\M480\Include;..\..\..\Library\StdDriver\inc;..\..\Template</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -471,6 +471,11 @@
               <FileType>1</FileType>
               <FilePath>..\..\..\Library\StdDriver\src\rtc.c</FilePath>
             </File>
+            <File>
+              <FileName>fmc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\Library\StdDriver\src\fmc.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -480,6 +485,11 @@
               <FileName>main.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\main.c</FilePath>
+            </File>
+            <File>
+              <FileName>EEPROM_Emulate.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\EEPROM_Emulate.c</FilePath>
             </File>
           </Files>
         </Group>

@@ -8,12 +8,26 @@
 #include <stdio.h>
 #include "NuMicro.h"
 
-#define LED_R						(PH0)
-#define LED_Y						(PH1)
-#define LED_G						(PH2)
+#include "EEPROM_Emulate.h"
 
-#define SIGNATURE      	 			(0x125ab234)
-#define FLAG_ADDR       			(0x20000FFC)
+#define LED_R									(PH0)
+#define LED_Y									(PH1)
+#define LED_G									(PH2)
+
+#define SIGNATURE      	 						(0x125ab234)
+#define FLAG_ADDR       						(0x20001000)
+
+//#define USE_DPD
+#define USE_SPD0
+
+//#define USE_RTC_TICK
+#define USE_WAKEUP_TIMER
+
+#define DATA_FLASH_AMOUNT						(24)
+#define DATA_FLASH_PAGE  						(2)
+
+
+#define EEP_ADDR_WAKEUP     					(0x05)	// max : DATA_FLASH_AMOUNT 
 
 typedef enum{
 	flag_DEFAULT = 0 ,
@@ -35,8 +49,6 @@ volatile uint32_t BitFlag = 0;
 uint32_t conter_tick = 0;
 
 /*----------------------------------------------------------------------------*/
-void UART0_Init(void);
-void TIMER1_Init(void);
 
 
 void tick_counter(void)
@@ -54,8 +66,46 @@ void set_tick(uint32_t t)
 	conter_tick = t;
 }
 
+
+void Emulate_EEPROM_Write(uint8_t idx , uint8_t value)
+{
+    SYS_UnlockReg();
+    FMC_Open();
+	
+	Write_Data(idx,value);
+
+    FMC_Close();
+    SYS_LockReg();
+}
+
+void Emulate_EEPROM_RecordTimes(void)
+{
+	uint8_t cnt = 0;
+	
+    SYS_UnlockReg();
+    FMC_Open();
+
+	Read_Data(EEP_ADDR_WAKEUP , &cnt);
+	printf("addr : 0x%4X , value : 0x%X\r\n" , EEP_ADDR_WAKEUP ,cnt);
+
+	cnt++;
+	Write_Data(EEP_ADDR_WAKEUP , cnt );
+
+    FMC_Close();
+    SYS_LockReg();		
+}
+
+// need to set data flash index in ICP tool , ex : 0x1E000
+void Emulate_EEPROM_Init(void)
+{
+	Init_EEPROM(DATA_FLASH_AMOUNT, DATA_FLASH_PAGE);
+	Search_Valid_Page();	
+}
+
+
 void CheckPowerSource(void)
 {
+
     uint32_t u32RegRstsrc;
     u32RegRstsrc = CLK_GetPMUWKSrc();
 
@@ -64,15 +114,29 @@ void CheckPowerSource(void)
     if((u32RegRstsrc & CLK_PMUSTS_RTCWK_Msk) != 0)
     {
         printf("Wake-up source is RTC.\r\n");
-		M32(FLAG_ADDR) += 1;
-		printf("0x%4X\r\n" , M32(FLAG_ADDR));
+
+		#if defined (USE_DPD)
+//		Emulate_EEPROM_RecordTimes();
 		
+		#elif defined (USE_SPD0)
+		M32(FLAG_ADDR) += 1;
+//		printf("0x%4X\r\n" , M32(FLAG_ADDR));
+		printf("addr : 0x%4X , value : 0x%X\r\n" , FLAG_ADDR ,M32(FLAG_ADDR));	
+		#endif		
     }
     if((u32RegRstsrc & CLK_PMUSTS_TMRWK_Msk) != 0)
     {
         printf("Wake-up source is Wake-up Timer.\r\n");
+
+		#if defined (USE_DPD)
+		Emulate_EEPROM_RecordTimes();
+		
+		#elif defined (USE_SPD0)
 		M32(FLAG_ADDR) += 1;
-		printf("0x%4X\r\n" , M32(FLAG_ADDR));
+//		printf("0x%4X\r\n" , M32(FLAG_ADDR));
+		printf("addr : 0x%4X , value : 0x%X\r\n" , FLAG_ADDR ,M32(FLAG_ADDR));	
+		#endif		
+
 		
     }
     if((u32RegRstsrc & CLK_PMUSTS_PINWK_Msk) != 0)
@@ -83,10 +147,15 @@ void CheckPowerSource(void)
 	
 }
 
-void  WakeUpRTCTickFunction(uint32_t u32PDMode)
+void WakeUpRTCTickFunction(uint32_t u32PDMode)
 {
-
     SYS_UnlockReg();
+
+	printf("entry power down (RTCTick) \r\n" );
+
+    /* Check if all the debug messages are finished */
+    while(!UART_IS_TX_EMPTY(UART0));
+
 
     /* enable RTC peripheral clock */
     CLK->APBCLK0 |= CLK_APBCLK0_RTCCKEN_Msk;
@@ -118,11 +187,6 @@ void  WakeUpRTCTickFunction(uint32_t u32PDMode)
     /* Enable RTC wake-up */
     CLK_ENABLE_RTCWK();
 
-	printf("entry power down\r\n" );
-
-    /* Check if all the debug messages are finished */
-    while(!UART_IS_TX_EMPTY(UART0));
-
     /* Enter to Power-down mode */
     CLK_PowerDown();
 
@@ -134,14 +198,31 @@ void WakeUpTimerFunction(uint32_t u32PDMode, uint32_t u32Interval)
 {
 	SYS_UnlockReg();
 
+	printf("entry power down (WakeUpTimer) \r\n" );
+
+    /* Check if all the debug messages are finished */
+    while(!UART_IS_TX_EMPTY(UART0));
+	
+
     /* Select Power-down mode */
     CLK_SetPowerDownMode(u32PDMode);
+
+	#if defined (USE_DPD)
+	if (u32PDMode == CLK_PMUCTL_PDMSEL_DPD)
+	{
+	    CLK_EnableXtalRC(CLK_PWRCTL_LIRCEN_Msk);
+	    /* Waiting for LIRC clock ready */
+	    CLK_WaitClockReady(CLK_STATUS_LIRCSTB_Msk);	
+	}
+	#endif
+
 
     /* Set Wake-up Timer Time-out Interval */
     CLK_SET_WKTMR_INTERVAL(u32Interval);
 
     /* Enable Wake-up Timer */
     CLK_ENABLE_WKTMR();
+
     /* Enter to Power-down mode */
     CLK_PowerDown();
 
@@ -156,8 +237,26 @@ void Loop_Process(void)
 	if (is_flag_set(flag_entry_power_down))
 	{
 		set_flag(flag_entry_power_down , DISABLE);
-//		WakeUpRTCTickFunction(CLK_PMUCTL_PDMSEL_SPD0);
-		WakeUpTimerFunction(CLK_PMUCTL_PDMSEL_SPD0, CLK_PMUCTL_WKTMRIS_16384);		
+
+		#if defined (USE_RTC_TICK)
+
+		#if defined (USE_DPD)		// only available for (M48xGC/ M48xE8 , check RM Table 6.2-6 Re-Entering Power-down Mode Condition 
+		WakeUpRTCTickFunction(CLK_PMUCTL_PDMSEL_DPD);
+		#elif defined (USE_SPD0)
+		WakeUpRTCTickFunction(CLK_PMUCTL_PDMSEL_SPD0);
+		#endif		
+
+		#endif	/*USE_RTC_TICK*/
+
+		#if defined (USE_WAKEUP_TIMER)
+
+		#if defined (USE_DPD)
+		WakeUpTimerFunction(CLK_PMUCTL_PDMSEL_DPD, CLK_PMUCTL_WKTMRIS_16384);	
+		#elif defined (USE_SPD0)
+		WakeUpTimerFunction(CLK_PMUCTL_PDMSEL_SPD0, CLK_PMUCTL_WKTMRIS_16384);	
+		#endif
+		
+		#endif	/*USE_WAKEUP_TIMER*/	
 	}
 	
 }
@@ -179,11 +278,21 @@ void UARTx_Process(void)
 		{
 	
 			case '1':
+				#if defined (USE_DPD)
+				WakeUpRTCTickFunction(CLK_PMUCTL_PDMSEL_DPD);
+				#elif defined (USE_SPD0)
 				WakeUpRTCTickFunction(CLK_PMUCTL_PDMSEL_SPD0);
+				#endif		
+			
 				break;	
 
 			case '2':
-				WakeUpTimerFunction(CLK_PMUCTL_PDMSEL_SPD0, CLK_PMUCTL_WKTMRIS_16384);
+				#if defined (USE_DPD)
+				WakeUpTimerFunction(CLK_PMUCTL_PDMSEL_DPD, CLK_PMUCTL_WKTMRIS_16384);	
+				#elif defined (USE_SPD0)
+				WakeUpTimerFunction(CLK_PMUCTL_PDMSEL_SPD0, CLK_PMUCTL_WKTMRIS_16384);	
+				#endif
+			
 				break;
 
 			case '3':
@@ -194,6 +303,13 @@ void UARTx_Process(void)
 			case 'x':
 			case 'Z':
 			case 'z':
+
+				#if defined (USE_DPD)
+				Emulate_EEPROM_Write(EEP_ADDR_WAKEUP , 0x00);
+				#elif defined (USE_SPD0)
+				M32(FLAG_ADDR) = 0;
+				#endif
+			
 				NVIC_SystemReset();
 			
 				break;		
@@ -264,11 +380,11 @@ void TMR1_IRQHandler(void)
 		{		
 			CNT = 0;
 			printf("%s : %2d\r\n" , __FUNCTION__ , log++);
+
+			//Emulate_EEPROM_RecordTimes();	// for test
+			
 			LED_R ^= 1;
 		}
-
-
-
 		
     }
 }
@@ -425,24 +541,27 @@ int main()
         GpioPinSetting();
     }
 
-
     CLK->APBCLK1 = 0x00000000;
     CLK->APBCLK0 = 0x00000000;
 
+	/* ---------- Turn off RTC  -------- */
+    CLK->APBCLK0 |= CLK_APBCLK0_RTCCKEN_Msk;
+    RTC_WaitAccessEnable();
+    RTC->INTEN = 0;
+    RTC_Close();	
 
     SYS_Init();
 
 	UART0_Init();
 
+	#if defined (USE_DPD)
+	Emulate_EEPROM_Init();
+	#endif
+	
+    CheckPowerSource();
+
 	LED_Init();
 	TIMER1_Init();
-
-
-    CLK->APBCLK0 |= CLK_APBCLK0_RTCCKEN_Msk;
-    RTC_WaitAccessEnable();
-    RTC->INTEN = 0;
-    RTC_Close();	
-    CheckPowerSource();
 
     /* Got no where to go, just loop forever */
     while(1)
