@@ -1,6 +1,15 @@
 # M480BSP_PWD_WAKUP
  M480BSP_PWD_WAKUP
 
+update @ 2021/03/30
+
+1. Add #define USE_LLPD and Button INIT (M487 ETM EVB , PG15 , PF11) 
+
+2. When entry power down with function : GPIOPowerDown , use button will wake up MCU 
+
+![image](https://github.com/released/M480BSP_PWD_WAKUP/blob/main/button.jpg)
+
+
 update @ 2020/12/04
 
 1. Add deep power down mode , base on \M480BSP\SampleCode\StdDriver\DYS_SPDMode_Wakeup

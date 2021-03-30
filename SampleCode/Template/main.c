@@ -18,10 +18,11 @@
 #define FLAG_ADDR       						(0x20001000)
 
 //#define USE_DPD
-#define USE_SPD0
+//#define USE_SPD0
+#define USE_LLPD
 
 //#define USE_RTC_TICK
-#define USE_WAKEUP_TIMER
+//#define USE_WAKEUP_TIMER
 
 #define DATA_FLASH_AMOUNT						(24)
 #define DATA_FLASH_PAGE  						(2)
@@ -147,6 +148,35 @@ void CheckPowerSource(void)
 	
 }
 
+void GPIOPowerDown(void)
+{
+    /* Enter power down when USB suspend */
+//    if(g_u8isSuspend)
+    {
+   		/* Unlock protected registers */		
+	    SYS_UnlockReg();
+			
+		GPIO_SET_OUT_DATA(PB, 0xFFFF);
+
+//		USBD->INTEN |= USBD_INTEN_WKEN_Msk;
+		CLK_SetPowerDownMode(CLK_PMUCTL_PDMSEL_LLPD);
+    	CLK_PowerDown();
+
+		if (CLK->PWRCTL & CLK_PWRCTL_PDEN_Msk)
+			CLK->PWRCTL ^= CLK_PWRCTL_PDEN_Msk;		
+
+		/* Note HOST to resume USB tree if it is suspended and remote wakeup enabled */
+//		HID_remoteWakeupProcess();
+				
+        /* Waiting for key release */
+//        while((PG->PIN & BIT15) != BIT15);
+        printf("System waken-up done.\r\n");
+
+		/* Lock protected registers */
+		SYS_LockReg();
+    }
+}
+
 void WakeUpRTCTickFunction(uint32_t u32PDMode)
 {
     SYS_UnlockReg();
@@ -238,6 +268,9 @@ void Loop_Process(void)
 	{
 		set_flag(flag_entry_power_down , DISABLE);
 
+        printf("Enter to Power-Down ......\r\n");
+    	UART_WAIT_TX_EMPTY(UART0);
+
 		#if defined (USE_RTC_TICK)
 
 		#if defined (USE_DPD)		// only available for (M48xGC/ M48xE8 , check RM Table 6.2-6 Re-Entering Power-down Mode Condition 
@@ -257,6 +290,13 @@ void Loop_Process(void)
 		#endif
 		
 		#endif	/*USE_WAKEUP_TIMER*/	
+
+		#if defined (USE_LLPD)
+		GPIOPowerDown();
+		
+		#endif
+
+		
 	}
 	
 }
@@ -422,6 +462,59 @@ void LED_Init(void)
 	
 }
 
+void GPG_IRQHandler(void)
+{
+//    if(GPIO_GET_INT_FLAG(PG, BIT15))
+//    {
+//        GPIO_CLR_INT_FLAG(PG, BIT15);
+//        printf("PG.15 INT occurred.\n");
+//    }
+//    else
+    {
+        PG->INTSRC = PG->INTSRC;
+//        printf("Un-expected interrupts.\n");
+		printf("PG.15 INT occurred.\n");
+    }
+}
+
+void GPF_IRQHandler(void)
+{
+//    if(GPIO_GET_INT_FLAG(PF, BIT11))
+//    {
+//        GPIO_CLR_INT_FLAG(PF, BIT11);
+//        printf("PF.11 INT occurred.\n");
+//    }
+//    else
+    {
+        PF->INTSRC = PF->INTSRC;
+//        printf("Un-expected interrupts.\n");
+		printf("PF.11 INT occurred.\n");
+    }
+}
+
+void BTN_Init(void)
+{
+    SYS->GPG_MFPH &= ~(SYS_GPG_MFPH_PG15MFP_Msk );
+    SYS->GPG_MFPH |= (SYS_GPG_MFPH_PG15MFP_GPIO );
+
+    SYS->GPF_MFPH &= ~(SYS_GPF_MFPH_PF11MFP_Msk );
+    SYS->GPF_MFPH |= (SYS_GPF_MFPH_PF11MFP_GPIO );
+
+
+	GPIO_SetMode(PG,BIT15,GPIO_MODE_INPUT);		//BTN1	
+	GPIO_SetMode(PF,BIT11,GPIO_MODE_INPUT);		//BTN2
+
+    GPIO_EnableInt(PG, 15, GPIO_INT_RISING);
+    GPIO_EnableInt(PF, 11, GPIO_INT_RISING);
+	
+    NVIC_EnableIRQ(GPG_IRQn);
+    NVIC_EnableIRQ(GPF_IRQn);
+	
+    GPIO_SET_DEBOUNCE_TIME(GPIO_DBCTL_DBCLKSRC_HCLK, GPIO_DBCTL_DBCLKSEL_1024);
+    GPIO_ENABLE_DEBOUNCE(PG, BIT15);	
+    GPIO_ENABLE_DEBOUNCE(PF, BIT11);		
+}
+
 void GpioPinSetting(void)
 {
     /* Set function pin to GPIO mode */
@@ -557,6 +650,8 @@ int main()
 	#if defined (USE_DPD)
 	Emulate_EEPROM_Init();
 	#endif
+
+	BTN_Init();
 	
     CheckPowerSource();
 
